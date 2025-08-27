@@ -1,6 +1,6 @@
 # Mapping a Transdiagnostic Dimension of Early Childhood Depressive Symptoms using the Preschool Feelings Checklist-Scale
 
-### This repo contains the scripts (R, Mplus) that were used to analyze the data for this investigation. A README file is also provided as a guide for running the scripts.
+### This repo contains the scripts (R, Mplus) that were used to analyze the data for this investigation (i.e., "To Share" folder). A README file is also provided as a guide for running the scripts.
 
 ### The analysis scripts were written by Nicolas L. Camacho.
 

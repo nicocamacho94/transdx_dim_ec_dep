@@ -1,0 +1,344 @@
+---
+title: "18a. ROC Curve Analyses with PFC-S General Factor Scores"
+author: "Nicolas L. Camacho"
+date: "2025-07-31"
+output: html_document
+---
+
+# Install packages (where necessary) and load libraries to run this script
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+required_packages <- c("knitr", "tidyverse", "cutpointr", "emmeans", "ggplot2",
+                       "patchwork")
+installed <- required_packages %in% rownames(installed.packages())
+if(any(!installed)) {
+  install.packages(required_packages[!installed])
+}
+invisible(lapply(required_packages, library, character.only = T))
+```
+
+# Set up the root directory from which the dataset with PFC-S factor scores and CBCL/KSADS-EC based groups is pulled
+```{r setup, echo = TRUE, message = FALSE, warning = FALSE}
+opts_knit$set(root.dir = "C:/Users/nicol/Box/01. Nicolas Dissertation/Data/")
+# Update this section to reflect the file path that contains the correct dataset
+```
+
+# Load data and retain only necessary columns
+```{r, message = FALSE}
+trunc_data <- read_csv("trunc_fscores_grps_updated.csv")
+```
+
+# KSADS
+
+## Comparison Set 1
+
+### No vs. Any Single Diagnosis
+```{r}
+# ROC curve metrics
+no_v_anySingle_cp <- cutpointr(trunc_data, pfc_gen_fs, no_v_anySingle,
+                               method = oc_youden_kernel, metric = youden,
+                               pos_class = 1, neg_class = 0, direction = ">=",
+                               na.rm = T)
+sum_no_v_anySingle_cp <- summary(no_v_anySingle_cp)
+sum_no_v_anySingle_cp
+# Predicted Probabilities
+trunc_2 <- trunc_data %>% mutate(pfc_cat_comp1 = 
+                                   case_when(pfc_gen_fs < -0.2477 ~ 0,
+                                             pfc_gen_fs >= -0.2477 ~ 1))
+no_v_anySingle_mod <- glm(no_v_anySingle ~ 1 + pfc_cat_comp1, data = trunc_2,
+                          family = binomial(link="logit"))
+emmeans(no_v_anySingle_mod, "pfc_cat_comp1", type = "response")
+```
+
+### No vs. Any Co-Occurring Diagnoses
+```{r}
+# ROC curve metrics
+no_v_anyCO_cp <- cutpointr(trunc_data, pfc_gen_fs, no_v_anyCO,
+                               method = oc_youden_kernel, metric = youden,
+                               pos_class = 1, neg_class = 0, direction = ">=",
+                               na.rm = T)
+sum_no_v_anyCO_cp <- summary(no_v_anyCO_cp)
+sum_no_v_anyCO_cp
+# Predicted Probabilities
+trunc_2 <- trunc_data %>% mutate(pfc_cat_comp2 = 
+                                   case_when(pfc_gen_fs < 0.0323 ~ 0,
+                                             pfc_gen_fs >= 0.0323 ~ 1))
+no_v_anyCO_mod <- glm(no_v_anyCO ~ 1 + pfc_cat_comp2, data = trunc_2,
+                          family = binomial(link="logit"))
+emmeans(no_v_anyCO_mod, "pfc_cat_comp2", type = "response")
+```
+
+### ROC Curve for Comparison Set 1
+```{r, fig.width = 3.5, fig.height = 3.5}
+roc_1a <- no_v_anySingle_cp$roc_curve[[1]] %>% mutate(outcome = factor("No vs. Any Single Diagnosis"))
+roc_1b <- no_v_anyCO_cp$roc_curve[[1]] %>% mutate(outcome = factor("No vs. Any Co-Occurring Diagnoses"))
+roc_1ab <- bind_rows(roc_1a, roc_1b)
+
+p1 <- ggplot(roc_1ab, aes(x = fpr, y = tpr, color = outcome)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_line(linewidth = 0.75) +
+  scale_color_manual(values = c("No vs. Any Single Diagnosis" = "#882255", 
+                                "No vs. Any Co-Occurring Diagnoses" = "#88CCEE")) +
+  annotate("pointrange", x = 1-0.8, y = 0.6552, ymin = 0.6552, ymax = 0.6552,
+           size = 0.75, linewidth = 0, colour = "#882255") +
+  annotate("pointrange", x = 1-0.8923, y = 0.9212, ymin = 0.9212, ymax = 0.9212,
+           size = 0.75, linewidth = 0, colour = "#88CCEE") +
+  coord_equal() +
+  theme_light(base_family = "serif", base_size = 12) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(ncol = 1)) +
+  labs(x = "1 - Specificity",
+       y = "Sensitivity",
+       color = NULL)
+```
+
+
+## Comparison Set 2
+
+### No vs. MDD+/CO-
+```{r}
+# ROC curve metrics
+no_v_mddPlus_noCO_cp <- cutpointr(trunc_data, pfc_gen_fs, no_v_mddPlus_noCO,
+                                  method = oc_youden_kernel, metric = youden,
+                                  pos_class = 1, neg_class = 0, direction = ">=",
+                                  na.rm = T)
+sum_no_v_mddPlus_noCO_cp <- summary(no_v_mddPlus_noCO_cp)
+sum_no_v_mddPlus_noCO_cp
+# Predicted Probabilities
+trunc_2 <- trunc_data %>% mutate(pfc_cat_comp3 = 
+                                   case_when(pfc_gen_fs < -0.221 ~ 0,
+                                             pfc_gen_fs >= -0.221 ~ 1))
+no_v_mddPlus_noCO_mod <- glm(no_v_mddPlus_noCO ~ 1 + pfc_cat_comp3, data = trunc_2,
+                          family = binomial(link="logit"))
+emmeans(no_v_mddPlus_noCO_mod, "pfc_cat_comp3", type = "response")
+```
+
+### No vs. MDD+/CO+
+```{r}
+# ROC curve metrics
+no_v_mddPlus_coPlus_cp <- cutpointr(trunc_data, pfc_gen_fs, no_v_mddPlus_coPlus,
+                                  method = oc_youden_kernel, metric = youden,
+                                  pos_class = 1, neg_class = 0, direction = ">=",
+                                  na.rm = T)
+sum_no_v_mddPlus_coPlus_cp <- summary(no_v_mddPlus_coPlus_cp)
+sum_no_v_mddPlus_coPlus_cp
+# Predicted Probabilities
+trunc_2 <- trunc_data %>% mutate(pfc_cat_comp4 = 
+                                   case_when(pfc_gen_fs < 0.0306 ~ 0,
+                                             pfc_gen_fs >= 0.0306 ~ 1))
+no_v_mddPlus_coPlus_mod <- glm(no_v_mddPlus_coPlus ~ 1 + pfc_cat_comp4, data = trunc_2,
+                          family = binomial(link="logit"))
+emmeans(no_v_mddPlus_coPlus_mod, "pfc_cat_comp4", type = "response")
+```
+
+### ROC Curve for Comparison Set 2
+```{r, fig.width = 3.5, fig.height = 3.5}
+roc_2a <- no_v_mddPlus_noCO_cp$roc_curve[[1]] %>% mutate(outcome = factor("No vs. MDD/CO-"))
+roc_2b <- no_v_mddPlus_coPlus_cp$roc_curve[[1]] %>% mutate(outcome = factor("No vs. MDD/CO+"))
+roc_2ab <- bind_rows(roc_2a, roc_2b)
+
+p2 <- ggplot(roc_2ab, aes(x = fpr, y = tpr, color = outcome)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_line(linewidth = 0.75) +
+  scale_color_manual(values = c("No vs. MDD/CO-" = "#882255", 
+                                "No vs. MDD/CO+" = "#88CCEE")) +
+  annotate("pointrange", x = 1-0.8077, y = 0.7619, ymin = 0.7619, ymax = 0.7619,
+           size = 0.75, linewidth = 0, colour = "#882255") +
+  annotate("pointrange", x = 1-0.8923, y = 0.9394, ymin = 0.9394, ymax = 0.9394,
+           size = 0.75, linewidth = 0, colour = "#88CCEE") +
+  coord_equal() +
+  theme_light(base_family = "serif", base_size = 12) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(ncol = 1)) +
+  labs(x = "1 - Specificity",
+       y = "Sensitivity",
+       color = NULL)
+```
+
+## Comparison Set 3
+
+### Any/MDD- vs. MDD+/CO-
+```{r}
+# ROC curve metrics
+any_noMDD_v_mddPlus_noCO_cp <- cutpointr(trunc_data, pfc_gen_fs, any_noMDD_v_mddPlus_noCO,
+                                  method = oc_youden_kernel, metric = youden,
+                                  pos_class = 1, neg_class = 0, direction = ">=",
+                                  na.rm = T)
+sum_any_noMDD_v_mddPlus_noCO_cp <- summary(any_noMDD_v_mddPlus_noCO_cp)
+sum_any_noMDD_v_mddPlus_noCO_cp
+# Predicted Probabilities
+trunc_2 <- trunc_data %>% mutate(pfc_cat_comp5 = 
+                                   case_when(pfc_gen_fs < -0.1063 ~ 0,
+                                             pfc_gen_fs >= -0.1063 ~ 1))
+any_noMDD_v_mddPlus_noCO_mod <- glm(any_noMDD_v_mddPlus_noCO ~ 1 + pfc_cat_comp5, data = trunc_2,
+                          family = binomial(link="logit"))
+emmeans(any_noMDD_v_mddPlus_noCO_mod, "pfc_cat_comp5", type = "response")
+```
+
+### Any/MDD- vs. MDD+/CO+
+```{r}
+# ROC curve metrics
+any_noMDD_v_mddPlus_coPlus_cp <- cutpointr(trunc_data, pfc_gen_fs, any_noMDD_v_mddPlus_coPlus,
+                                  method = oc_youden_kernel, metric = youden,
+                                  pos_class = 1, neg_class = 0, direction = ">=",
+                                  na.rm = T)
+sum_any_noMDD_v_mddPlus_coPlus_cp <- summary(any_noMDD_v_mddPlus_coPlus_cp)
+sum_any_noMDD_v_mddPlus_coPlus_cp
+# Predicted Probabilities
+trunc_2 <- trunc_data %>% mutate(pfc_cat_comp6 = 
+                                   case_when(pfc_gen_fs < 0.1384 ~ 0,
+                                             pfc_gen_fs >= 0.1384 ~ 1))
+any_noMDD_v_mddPlus_coPlus_mod <- glm(any_noMDD_v_mddPlus_coPlus ~ 1 + pfc_cat_comp6, data = trunc_2,
+                          family = binomial(link="logit"))
+emmeans(any_noMDD_v_mddPlus_coPlus_mod, "pfc_cat_comp6", type = "response")
+```
+
+### ROC Curve for Comparison Set 3
+```{r, fig.width = 3.5, fig.height = 3.5}
+roc_3a <- any_noMDD_v_mddPlus_noCO_cp$roc_curve[[1]] %>% mutate(outcome = factor("Any/MDD- vs. MDD/CO-"))
+roc_3b <- any_noMDD_v_mddPlus_coPlus_cp$roc_curve[[1]] %>% mutate(outcome = factor("Any/MDD- vs. MDD/CO+"))
+roc_3ab <- bind_rows(roc_3a, roc_3b)
+
+p3 <- ggplot(roc_3ab, aes(x = fpr, y = tpr, color = outcome)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_line(linewidth = 0.75) +
+  scale_color_manual(values = c("Any/MDD- vs. MDD/CO-" = "#882255", 
+                                "Any/MDD- vs. MDD/CO+" = "#88CCEE")) +
+  annotate("pointrange", x = 1-0.6452, y = 0.7619, ymin = 0.7619, ymax = 0.7619,
+           size = 0.75, linewidth = 0, colour = "#882255") +
+  annotate("pointrange", x = 1-0.7742, y = 0.9141, ymin = 0.9141, ymax = 0.9141,
+           size = 0.75, linewidth = 0, colour = "#88CCEE") +
+  coord_equal() +
+  theme_light(base_family = "serif", base_size = 12) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(ncol = 1)) +
+  labs(x = "1 - Specificity",
+       y = "Sensitivity",
+       color = NULL)
+```
+
+## ANX+/MDD- vs. MDD+/ANX-
+```{r}
+# ROC curve metrics
+anxPlus_noMDD_v_mddPlus_noANX_cp <- cutpointr(trunc_data, pfc_gen_fs, 
+                                              anxPlus_noMDD_v_mddPlus_noANX,
+                                              method = oc_youden_kernel, metric = youden,
+                                              pos_class = 1, neg_class = 0, direction = ">=",
+                                              na.rm = T)
+sum_anxPlus_noMDD_v_mddPlus_noANX_cp <- summary(anxPlus_noMDD_v_mddPlus_noANX_cp)
+sum_anxPlus_noMDD_v_mddPlus_noANX_cp
+# Predicted Probabilities
+trunc_2 <- trunc_data %>% mutate(pfc_cat_comp7 = 
+                                   case_when(pfc_gen_fs < 0.1473 ~ 0,
+                                             pfc_gen_fs >= 0.1473 ~ 1))
+anxPlus_noMDD_v_mddPlus_noANX_mod <- glm(anxPlus_noMDD_v_mddPlus_noANX ~ 1 + pfc_cat_comp7, data = trunc_2,
+                          family = binomial(link="logit"))
+emmeans(anxPlus_noMDD_v_mddPlus_noANX_mod, "pfc_cat_comp7", type = "response")
+```
+
+## ROC Curve for Comparison 7
+```{r, fig.width = 3.5, fig.height = 3.5}
+roc_4 <- anxPlus_noMDD_v_mddPlus_noANX_cp$roc_curve[[1]] %>% mutate(outcome = factor("ANX/MDD- vs. MDD/ANX-"))
+
+p4 <- ggplot(roc_4, aes(x = fpr, y = tpr, color = outcome)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_line(linewidth = 0.75) +
+  scale_color_manual(values = c("black")) +
+  annotate("pointrange", x = 1-0.8214, y = 0.8214, ymin = 0.8214, ymax = 0.8214,
+           size = 0.75, linewidth = 0, colour = "black") +
+  coord_equal() +
+  theme_light(base_family = "serif", base_size = 12) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(ncol = 1)) +
+  labs(x = "1 - Specificity",
+       y = "Sensitivity",
+       color = NULL)
+```
+
+
+```{r, fig.width = 7, fig.height = 7}
+(p1 | p2) / (p3 | p4) +
+  plot_annotation(tag_levels = "A")
+```
+
+
+# CBCL Dimensions
+
+## Internalizing
+```{r}
+# ROC curve metrics
+int_cp <- cutpointr(trunc_data, pfc_gen_fs, cbcl_int_grp, 
+                    method = oc_youden_kernel, metric = youden,
+                    pos_class = 1, neg_class = 0, direction = ">=", na.rm = T)
+sum_int_cp <- summary(int_cp)
+sum_int_cp
+# Predicted Probabilities
+trunc_2 <- trunc_data %>% mutate(pfc_cat_comp8 = 
+                                   case_when(pfc_gen_fs < 0.0847 ~ 0,
+                                             pfc_gen_fs >= 0.0847 ~ 1))
+int_mod <- glm(cbcl_int_grp ~ 1 + pfc_cat_comp8, data = trunc_2,
+               family = binomial(link="logit"))
+emmeans(int_mod, "pfc_cat_comp8", type = "response")
+```
+
+## Externalizing
+```{r}
+# ROC curve metrics
+ext_cp <- cutpointr(trunc_data, pfc_gen_fs, cbcl_ext_grp, 
+                    method = oc_youden_kernel, metric = youden,
+                    pos_class = 1, neg_class = 0, direction = ">=", na.rm = T)
+sum_ext_cp <- summary(ext_cp)
+sum_ext_cp
+# Predicted Probabilities
+trunc_2 <- trunc_data %>% mutate(pfc_cat_comp9 = 
+                                   case_when(pfc_gen_fs < 0.1226 ~ 0,
+                                             pfc_gen_fs >= 0.1226 ~ 1))
+ext_mod <- glm(cbcl_ext_grp ~ 1 + pfc_cat_comp9, data = trunc_2,
+               family = binomial(link="logit"))
+emmeans(ext_mod, "pfc_cat_comp9", type = "response")
+```
+
+## Total
+```{r}
+# ROC curve metrics
+tot_cp <- cutpointr(trunc_data, pfc_gen_fs, cbcl_tot_grp, 
+                    method = oc_youden_kernel, metric = youden,
+                    pos_class = 1, neg_class = 0, direction = ">=", na.rm = T)
+sum_tot_cp <- summary(tot_cp)
+sum_tot_cp
+# Predicted Probabilities
+trunc_2 <- trunc_data %>% mutate(pfc_cat_comp10 = 
+                                   case_when(pfc_gen_fs < 0.1706 ~ 0,
+                                             pfc_gen_fs >= 0.1706 ~ 1))
+tot_mod <- glm(cbcl_tot_grp ~ 1 + pfc_cat_comp10, data = trunc_2,
+               family = binomial(link="logit"))
+emmeans(tot_mod, "pfc_cat_comp10", type = "response")
+```
+
+## ROC Curve for CBCL Comparison Set
+```{r, fig.width = 5, fig.height = 5}
+roc_5a <- int_cp$roc_curve[[1]] %>% mutate(outcome = factor("Internalizing"))
+roc_5b <- ext_cp$roc_curve[[1]] %>% mutate(outcome = factor("Externalizing"))
+roc_5c <- tot_cp$roc_curve[[1]] %>% mutate(outcome = factor("Total Problems"))
+roc_5abc <- bind_rows(roc_5a, roc_5b, roc_5c)
+
+ggplot(roc_5abc, aes(x = fpr, y = tpr, color = outcome)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  geom_line(linewidth = 0.75) +
+  scale_color_manual(values = c("Internalizing" = "#44AA99", 
+                                "Externalizing" = "#CC6677",
+                                "Total Problems" = "#332288")) +
+  annotate("pointrange", x = 1-0.7076, y = 0.8861, ymin = 0.8861, ymax = 0.8861,
+           size = 0.75, linewidth = 0, colour = "#44AA99") +
+  annotate("pointrange", x = 1-0.6667, y = 0.8765, ymin = 0.8765, ymax = 0.8765,
+           size = 0.75, linewidth = 0, colour = "#CC6677") +
+  annotate("pointrange", x = 1-0.7661, y = 0.8798, ymin = 0.8798, ymax = 0.8798,
+           size = 0.75, linewidth = 0, colour = "#332288") +
+  coord_equal() +
+  guides(color = guide_legend(ncol = 3)) +
+  labs(x = "1 - Specificity",
+       y = "Sensitivity",
+       color = NULL) +
+  theme_light(base_family = "serif", base_size = 12) +
+  theme(legend.position = "bottom")
+
+```

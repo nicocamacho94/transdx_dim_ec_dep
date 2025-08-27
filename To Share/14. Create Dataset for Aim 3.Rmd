@@ -1,0 +1,169 @@
+---
+title: "14. Create dataset for Aim 3"
+author: "Nicolas L. Camacho"
+date: "2025-08-27"
+output: html_document
+---
+
+# Install packages (where necessary) and load libraries to run this script
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+required_packages <- c("knitr", "tidyverse", "report", "ggVennDiagram")
+installed <- required_packages %in% rownames(installed.packages())
+if(any(!installed)) {
+  install.packages(required_packages[!installed])
+}
+invisible(lapply(required_packages, library, character.only = T))
+```
+
+# Set up the root directory from which the cleaned dataset and the dataset with PFC-S factor scores are pulled
+```{r setup, echo = TRUE, message = FALSE, warning = FALSE}
+opts_knit$set(root.dir = "C:/Users/nicol/Box/01. Nicolas Dissertation/Data")
+# Update this section to reflect the file path that contains the Mplus output
+```
+
+# Load data, retain only necessary columns, and combine dataframes
+```{r, message = FALSE}
+trunc_data <- read_csv("truncated_dataset.csv") %>% 
+  dplyr::select(., subid:pfc23, cbcl_int_t:cgas, mdd_dx:ptsd_cons)
+pfcs_gen_fscores <- read_table("fscores_pfcs.dat", col_names = F) %>% 
+  dplyr::select(., X23) %>% 
+  rename(pfc_gen_fs = X23)
+trunc_2 <- bind_cols(trunc_data, pfcs_gen_fscores) %>% 
+  relocate(pfc_gen_fs, .after = pfc23)
+```
+
+# Establish CBCL and KSADS Clinical Groups
+
+## CBCL
+
+### Create dummy coded variables for Internalizing, Externalizing, and Total Problems
+#### T-Scores < 65 = Non-Clinical (0) and T-Scores >= 65 = Clinical (1)
+```{r}
+trunc_3 <- trunc_2 %>% 
+  mutate(cbcl_int_grp = factor(case_when(cbcl_int_t < 65 ~ 0, cbcl_int_t >= 65 ~ 1)),
+         cbcl_ext_grp = factor(case_when(cbcl_ext_t < 65 ~ 0, cbcl_ext_t >= 65 ~ 1)),
+         cbcl_tot_grp = factor(case_when(cbcl_tot_t < 65 ~ 0, cbcl_tot_t >= 65 ~ 1))) %>% 
+  relocate(c(cbcl_int_grp, cbcl_ext_grp, cbcl_tot_grp), .after = cbcl_tot_t)
+```
+
+### Assess CBCL clinical group sizes
+```{r}
+trunc_3 %>% 
+  dplyr::select(., cbcl_int_grp:cbcl_tot_grp) %>% 
+  report()
+```
+
+## KSADS
+
+### Create merged KSADS diagnoses due to low sample sizes in specific diagnoses
+#### Anxiety Dx = SAD, Soc Phob, Spec Phob, and GAD
+#### Disruptive Behavior Dx = ADHD, ODD, ODD NOS, CD
+#### Other dx = Mania/Hypomania, OCD, and PTSD
+#### Any Dx = any combo of the above
+```{r}
+trunc_4 <- trunc_3 %>% 
+  mutate(anx_dx = case_when((sad_cons == 1 | socphob_cons == 1 | 
+                                specphob_cons == 1 | gad_cons == 1) ~ 1,
+                             (sad_cons == 0 & socphob_cons == 0 &
+                                specphob_cons == 0 & gad_cons == 0) ~ 0),
+         dbd_dx = case_when((adhd_cons == 1 | odd_cons == 1 | oddnos_cons == 1 |
+                               cd_cons == 1) ~ 1,
+                            (adhd_cons == 0 & odd_cons == 0 & oddnos_cons == 0 & 
+                               cd_cons == 0) ~ 0),
+         other_dx = case_when((mania_cons == 1 | hypomania_cons == 1 |
+                                 ocd_cons == 1 | ptsd_cons == 1) ~ 1,
+                              (mania_cons == 0 & hypomania_cons == 0 &
+                                 ocd_cons == 0 & ptsd_cons == 0) ~ 0),
+         any_dx = case_when((mdd_dx == 1 | anx_dx == 1 | dbd_dx == 1 |
+                               other_dx == 1) ~ 1,
+                            (mdd_dx == 0 & anx_dx == 0 & dbd_dx == 0 &
+                               other_dx == 0) ~ 0))
+```
+
+```{r, fig.width = 5, fig.height = 4}
+x_df <- trunc_4 %>%
+  transmute(mdd = case_when(mdd_dx == 1 ~ 1,
+                            mdd_dx == 0 ~ 0),
+            anx = case_when(anx_dx == 1 ~ 1,
+                            anx_dx == 0 ~ 0),
+            dbd = case_when(dbd_dx == 1 ~ 1,
+                            dbd_dx == 0 ~ 0),
+            other = case_when(other_dx == 1 ~ 1,
+                              other_dx == 0 ~ 0))
+x_list <- list(mdd = which(x_df$mdd == 1), 
+               anx = which(x_df$anx == 1),
+               dbd = which(x_df$dbd == 1 ),
+               other = which(x_df$other == 1))
+ggVennDiagram(x_list[1:4], category.names = c("MDD", "Anxiety", "DBDs", "Other"),
+              set_color = c("#009E73", "#CC79A7", "#0072B2", "#D55E00"),
+              label_color = "black", label_font = "serif",
+              label = "count", label_alpha = 0) + 
+  scale_fill_gradient(low="white",high = "white") +
+  theme(legend.position = "none")
+```
+
+### Create groups based on comparisons of interest
+```{r}
+trunc_5 <- trunc_4 %>% 
+  mutate(
+    # set 1
+    no_v_anySingle = case_when(any_dx == 0 ~ 0,
+                               any_dx == 1 &
+                                 rowSums(dplyr::select(., "mdd_dx", "anx_dx",
+                                                       "dbd_dx", "other_dx"), 
+                                         na.rm = F) == 1 ~ 1),
+    no_v_anyCO = case_when(any_dx == 0 ~ 0,
+                           any_dx == 1 &
+                             rowSums(dplyr::select(., "mdd_dx", "anx_dx",
+                                                       "dbd_dx", "other_dx"), 
+                                     na.rm = T) > 1 ~ 1),
+    # set 2
+    no_v_mddPlus_noCO = case_when(any_dx == 0 ~ 0,
+                                  mdd_dx == 1 & 
+                                    rowSums(dplyr::select(., "anx_dx", "dbd_dx", 
+                                                          "other_dx"),
+                                            na.rm = F) == 0 ~ 1),
+    no_v_mddPlus_coPlus = case_when(any_dx == 0 ~ 0,
+                                    mdd_dx == 1 & 
+                                      rowSums(dplyr::select(., "anx_dx", "dbd_dx",
+                                                            "other_dx"),
+                                              na.rm = T) > 0 ~ 1),
+    # set 3
+    any_noMDD_v_mddPlus_noCO = case_when(mdd_dx == 0 &
+                                             rowSums(dplyr::select(., "anx_dx", "dbd_dx",
+                                                            "other_dx"),
+                                              na.rm = T) > 0 ~ 0,
+                                         mdd_dx == 1 & 
+                                    rowSums(dplyr::select(., "anx_dx", "dbd_dx", 
+                                                          "other_dx"),
+                                            na.rm = F) == 0 ~ 1),
+    any_noMDD_v_mddPlus_coPlus = case_when(mdd_dx == 0 &
+                                             rowSums(dplyr::select(., "anx_dx", "dbd_dx",
+                                                            "other_dx"),
+                                              na.rm = T) > 0 ~ 0,
+                                           mdd_dx == 1 &  
+                                      rowSums(dplyr::select(., "anx_dx", "dbd_dx",
+                                                            "other_dx"),
+                                              na.rm = T) > 0 ~ 1),
+
+    # last comparison
+    anxPlus_noMDD_v_mddPlus_noANX = case_when(anx_dx == 1 & mdd_dx == 0 ~ 0,
+                                              mdd_dx == 1 & anx_dx == 0 ~ 1))
+```
+
+```{r}
+trunc_5 %>% 
+  dplyr::select(., no_v_anySingle:anxPlus_noMDD_v_mddPlus_noANX) %>% 
+  mutate_all(., factor) %>% 
+  report(.)
+```
+
+```{r}
+write.csv(trunc_5,
+          file = "C:/Users/nicol/Box/01. Nicolas Dissertation/Data/trunc_fscores_grps_updated.csv",
+          row.names = F)
+```
+
+
+
+

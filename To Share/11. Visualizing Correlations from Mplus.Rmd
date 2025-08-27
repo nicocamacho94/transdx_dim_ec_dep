@@ -1,0 +1,144 @@
+---
+title: "11. Visualizing Correlations from Mplus"
+author: "Nicolas L. Camacho"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Install packages (where necessary) and load libraries to run this script
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+required_packages <- c("knitr", "tidyverse", "MplusAutomation", "ggplot2")
+installed <- required_packages %in% rownames(installed.packages())
+if(any(!installed)) {
+  install.packages(required_packages[!installed])
+}
+invisible(lapply(required_packages, library, character.only = T))
+```
+
+# Set up the root directory where the Mplus output files are saved
+```{r setup, echo = TRUE, message = FALSE, warning = FALSE}
+opts_knit$set(root.dir = "C:/Users/nicol/Box/01. Nicolas Dissertation/Data/Analyses/To Share")
+# Update this section to reflect the file path that contains the Mplus output
+```
+
+# Load all Mplus output files
+```{r}
+all_mplus_output <- readModels(target = getwd(), recursive = T)
+```
+
+# Pull the necessary details from each output file regarding correlations
+# between PFC-S and external measures
+
+## PFC-S, BIS/BAS, ERC, and BDI-II
+```{r}
+bisbas_erc_bdi <- all_mplus_output$C..Users.nicol.Box.01..Nicolas.Dissertation.Analyses.To.Share.07..correlation.model.1.out
+bisbas_erc_bdi_df <- bisbas_erc_bdi$parameters$stdyx.standardized %>%
+  filter(str_detect(paramHeader, "LV.WITH") & str_starts(param, "G")) %>% 
+  dplyr::select(., paramHeader, est, se) %>% 
+  rename(cor_var = paramHeader, r = est) %>% 
+  mutate(lower95 = r - (1.96*se), upper95 = r + (1.96*se)) %>% 
+  mutate(cor_var = case_when(cor_var == "BDI_LV.WITH" ~ "bdi_mean",
+                             cor_var == "BIS_LV.WITH" ~ "bis_mean",
+                             cor_var == "BAS_LV.WITH" ~ "bas_mean",
+                             cor_var == "DRV_LV.WITH" ~ "bas_drive_mean",
+                             cor_var == "FUN_LV.WITH" ~ "bas_funseek_mean",
+                             cor_var == "REW_LV.WITH" ~ "bas_reward_mean",
+                             cor_var == "ER_LV.WITH" ~ "erc_er_mean",
+                             cor_var == "LN_LV.WITH" ~ "erc_ln_mean"))
+```
+
+## PFC-S and My Child 2 Guilt Feelings
+```{r}
+mc2_gltfeel <- all_mplus_output$C..Users.nicol.Box.01..Nicolas.Dissertation.Analyses.To.Share.08a..correlation.model.2...my.child.2.out
+mc2_gltfeel_df <- mc2_gltfeel$parameters$stdyx.standardized %>% 
+  filter(paramHeader == "G.WITH" & param == "GLT_LV") %>% 
+  dplyr::select(., param, est, se) %>% 
+  rename(cor_var = param, r = est) %>% 
+  mutate(lower95 = r - (1.96*se), upper95 = r + (1.96*se)) %>% 
+  mutate(cor_var = "mca_gltfeel_mean")
+```
+
+## PFC-S and BRIEF GEC
+```{r}
+brief_gec <- all_mplus_output$C..Users.nicol.Box.01..Nicolas.Dissertation.Analyses.To.Share.08b..correlation.model.2...brief.gec.out
+brief_gec_df <- brief_gec$parameters$stdyx.standardized %>% 
+  filter(paramHeader == "G.WITH" & param == "BRIEF_GEC") %>% 
+  dplyr::select(., param, est, se) %>% 
+  rename(cor_var = param, r = est) %>% 
+  mutate(lower95 = r - (1.96*se), upper95 = r + (1.96*se)) %>% 
+  mutate(cor_var = "brief_gec_t_comb")
+```
+
+## PFC-S and KSADS Anhedonia Item
+```{r}
+ksads_anh <- all_mplus_output$C..Users.nicol.Box.01..Nicolas.Dissertation.Analyses.To.Share.08c..correlation.model.2...ksads.anhedonia.out
+ksads_anh_df <- ksads_anh$parameters$stdyx.standardized %>% 
+  filter(paramHeader == "G.WITH" & param == "KS_ANHED") %>% 
+  dplyr::select(., param, est, se) %>% 
+  rename(cor_var = param, r = est) %>% 
+  mutate(lower95 = r - (1.96*se), upper95 = r + (1.96*se)) %>% 
+  mutate(cor_var = "ksads_anhedonia")
+```
+
+## PFC-S and Child Age
+```{r}
+child_age <- all_mplus_output$C..Users.nicol.Box.01..Nicolas.Dissertation.Analyses.To.Share.09a..exploratory.correlation.bw.pfc.s.and.child.age.out
+child_age_df <- child_age$parameters$stdyx.standardized %>% 
+  filter(paramHeader == "G.WITH" & param == "AGE") %>% 
+  dplyr::select(., param, est, se) %>% 
+  rename(cor_var = param, r = est) %>% 
+  mutate(lower95 = r - (1.96*se), upper95 = r + (1.96*se)) %>% 
+  mutate(cor_var = "age_mos")
+```
+
+## PFC-S and Child Sex
+```{r}
+child_sex <- all_mplus_output$C..Users.nicol.Box.01..Nicolas.Dissertation.Analyses.To.Share.09b..exploratory.correlation.bw.pfc.s.and.child.sex.out
+child_sex_df <- child_sex$parameters$stdyx.standardized %>% 
+  filter(paramHeader == "G.WITH" & param == "SEX") %>% 
+  dplyr::select(., param, est, se) %>% 
+  rename(cor_var = param, r = est) %>% 
+  mutate(lower95 = r - (1.96*se), upper95 = r + (1.96*se)) %>%
+  mutate(cor_var = "sex")
+```
+
+## Combine all correlation data & produce visualization
+```{r, fig.width = 6, fig.height = 6}
+comb_df <- bisbas_erc_bdi_df %>% 
+  bind_rows(mc2_gltfeel_df, brief_gec_df, ksads_anh_df, child_age_df, child_sex_df) %>% 
+  mutate(sig = factor(if_else((r > 0 & lower95 > 0) | (r < 0 & upper95 < 0), 1, 0)))
+
+level_order <- c("Age (months)", "Sex", 
+                 "KSADS-EC Anhedonia", "MC2 Guilt Feelings", "BRIEF GEC T-Scores", 
+                 "Caregiver BDI-II", "BIS", "BAS", 
+                 "BAS Drive", "BAS Fun Seeking", "BAS Reward Responsiveness", 
+                 "ERC Emotion Regulation", "ERC Lability/Negativity")
+
+comb_df %>% 
+  mutate(cor_var = case_when(cor_var == "age_mos" ~ "Age (months)",
+                             cor_var == "sex" ~ "Sex",
+                             cor_var == "bdi_mean" ~ "Caregiver BDI-II",
+                             cor_var == "bis_mean" ~ "BIS",
+                             cor_var == "bas_mean" ~ "BAS",
+                             cor_var == "bas_drive_mean" ~ "BAS Drive",
+                             cor_var == "bas_funseek_mean" ~ "BAS Fun Seeking",
+                             cor_var == "bas_reward_mean" ~ "BAS Reward Responsiveness",
+                             cor_var == "erc_er_mean" ~ "ERC Emotion Regulation",
+                             cor_var == "erc_ln_mean" ~ "ERC Lability/Negativity",
+                             cor_var == "mca_gltfeel_mean" ~ "MC2 Guilt Feelings",
+                             cor_var == "brief_gec_t_comb" ~ "BRIEF GEC T-Scores",
+                             cor_var == "ksads_anhedonia" ~ "KSADS-EC Anhedonia")) %>%
+  ggplot(aes(r, factor(cor_var, levels = level_order), color = sig)) + 
+  geom_vline(xintercept = 0, lty = 2, alpha = 0.2) +
+  scale_color_manual(values = c("1" = "black", "0" = "darkgray")) +
+  geom_point() +
+  geom_text(aes(label = sprintf("%.2f", r), vjust = -1),
+            family = "serif", size = 4.5) +
+  geom_errorbarh(aes(xmin = lower95, xmax = upper95, height = 0.5)) +
+  scale_x_continuous(breaks = seq(-1, 1, 0.2)) +
+  labs(x = "Correlation", y = "Validation Measures") +
+  theme_classic() +
+  theme(legend.position = "none",
+        text = element_text(family = "serif", size = 15))
+```
+

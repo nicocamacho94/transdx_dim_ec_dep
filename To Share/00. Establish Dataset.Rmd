@@ -1,0 +1,422 @@
+---
+title: "00. Establish Dataset"
+author: "Nicolas L. Camacho"
+date: "2025-08-27"
+output:
+  html_document: default
+---
+
+# Install packages (where necessary) and load libraries to run this script
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+required_packages <- c("knitr", "tidyverse", "haven", "psych")
+installed <- required_packages %in% rownames(installed.packages())
+if(any(!installed)) {
+  install.packages(required_packages[!installed])
+}
+invisible(lapply(required_packages, library, character.only = T))
+```
+
+# Set up the root directory from which the original dataset is pulled
+```{r setup, echo = TRUE, message = FALSE, warning = FALSE}
+opts_knit$set(root.dir = "C:/Users/nicol/Box/01. Nicolas Dissertation/Data/")
+# Update this section to reflect the file path that contains the original dataset
+```
+
+# Load the original dataset with all variables and participants
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+all_data <- read_sav("PCIT-ED_NOA_dataset_013025.sav")
+# Update this section to reflect the file name for the original dataset
+```
+
+# Truncate dataset to include only necessary variables
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+trunc_data <- all_data %>% 
+  dplyr::select(., subid:income, pfc1:erc24, mca2, mca3, mca7, mca12, mca14, 
+                mca15, mca18, mca19, mca20, mca24:mca28, mca30, mca38:mca41, 
+                mca43:mca47, mca55, mca61, mca66, mca70, mca73, mca84, mca85, 
+                mca91, mca93, mca95, mca96, mca99, mca100, pregects, gects,
+                CBCL155_INTL_T, CBCL155_EXTL_T, CBCL155_TOTAL_T,
+                CBCL618_INTL_T, CBCL618_EXTL_T, CBCL618_TOTAL_T,
+                cgas, contains("KSADS_MDD"), contains("cons"), -contains("inconsc"),
+                -contains("impair"))
+```
+
+# Update variables for increased interpretability
+```{r}
+trunc_data_2 <- trunc_data %>% 
+  mutate(subid = as.character(case_when(str_starts(subid, "5") ~ paste0(subid,"_noa"),
+                                        str_starts(subid, "80") ~ paste0(subid, "_pcited_hc"),
+                                        str_starts(subid, "82") ~ paste0(subid, "_pcited_cc"),
+                                        str_starts(subid, "9") ~ paste0(subid, "_pcited_base"))),
+         age_mos = as.numeric(age_mos),
+         sex = factor(case_when(sex == 1 ~ "Male",
+                                   sex == 2 ~ "Female")),
+         race = factor(case_when(race == 1 ~ "White",
+                                 race == 2 ~ "Black",
+                                 race == 3 ~ "AI_AN",
+                                 race == 4 ~ "Asian",
+                                 race == 5 ~ "NativeHawaiian",
+                                 race == 6 ~ "Multiracial",
+                                 race == 7 ~ "Unknown")),
+         racespec = if_else(racespec == "", NA, as.factor(racespec)),
+         hispanic = factor(case_when(hispanic == 0 ~ "Not_Hispanic",
+                                     hispanic == 1 ~ "Hispanic")),
+         child_edu = factor(case_when(child_edu == 0 ~ "Not_Enrolled",
+                                      child_edu == 1 ~ "Daycare",
+                                      child_edu == 2 ~ "PreK",
+                                      child_edu == 3 ~ "Kindergarten",
+                                      child_edu == 4 ~ "First_Grade",
+                                      child_edu == 5 ~ "Second_Grade")),
+         informant = factor(case_when(informant == 1 ~ "Bio_Mother",
+                                      informant == 2 ~ "Bio_Father",
+                                      informant == 3 ~ "Epi_Mother",
+                                      informant == 4 ~ "Adoptive_Mother",
+                                      informant == 5 ~ "Adoptive_Father",
+                                      informant == 6 ~ "Step_Mother",
+                                      informant == 7 ~ "Step_Father",
+                                      informant == 8 ~ "Grandparent",
+                                      informant == 9 ~ "Other_Relative",
+                                      informant == 10 ~ "Other")),
+         income = factor(case_when(income == 0 ~ "No income",
+                                   income == 5000 | income == 10000 ~ "$1-10,000",
+                                   income == 15000 | income == 20000 ~ "$10,001-20,000",
+                                   income == 25000 | income == 30000 ~ "$20,001-30,000",
+                                   income == 35000 | income == 40000 ~ "$30,001-40,000",
+                                   income == 45000 | income == 50000 ~ "$40,001-50,000",
+                                   income == 55000 | income == 60000 ~ "$50,001-60,000",
+                                   income == 65000 | income == 70000 ~ "$60,001-70,000",
+                                   income == 75000 | income == 80000 ~ "$70,001-80,000",
+                                   income == 85000 | income == 90000 ~ "$80,001-90,000",
+                                   income == 95000 | income == 100000 ~ "$90,001-100,000",
+                                   income == 100001 ~ "$100,001+")),
+         bdi16 = round(bdi16, digits = 0),
+         bdi18 = round(bdi18, digits = 0),
+         across(pfc1:PTSDcons, as.numeric)) %>% 
+  rename_with(., ~tolower(gsub("c_", "", .x, fixed = T))) %>% 
+  rename_with(., ~gsub("cons", "_cons", .x, fixed = T)) %>% 
+  rename(pfc01 = pfc1, pfc02 = pfc2, pfc03 = pfc3, pfc04 = pfc4, pfc05 = pfc5,
+         pfc06 = pfc6, pfc07 = pfc7, pfc08 = pfc8, pfc09 = pfc9, bdi01 = bdi1,
+         bdi02 = bdi2, bdi03 = bdi3, bdi04 = bdi4, bdi05 = bdi5, bdi06 = bdi6,
+         bdi07 = bdi7, bdi08 = bdi8, bdi09 = bdi9, bisbas01 = bisbas1,
+         bisbas02 = bisbas2, bisbas03 = bisbas3, bisbas04 = bisbas4,
+         bisbas05 = bisbas5, bisbas06 = bisbas6, bisbas07 = bisbas7,
+         bisbas08 = bisbas8, bisbas09 = bisbas9, erc01 = erc1, erc02 = erc2,
+         erc03 = erc3, erc04 = erc4, erc05 = erc5, erc06 = erc6, erc07 = erc7,
+         erc08 = erc8, erc09 = erc9, mca02 = mca2, mca03 = mca3, mca07 = mca7, 
+         pre_brief_gec_t = pregects, brief_gec_t = gects) %>% 
+  mutate(brief_gec_t_comb = case_when(is.na(pre_brief_gec_t) & !is.na(brief_gec_t) ~ brief_gec_t,
+                                      !is.na(pre_brief_gec_t) & is.na(brief_gec_t) ~ pre_brief_gec_t),
+         cbcl_int_t = case_when(is.na(cbcl155_intl_t) & !is.na(cbcl618_intl_t) ~ cbcl618_intl_t,
+                                !is.na(cbcl155_intl_t) & is.na(cbcl618_intl_t) ~ cbcl155_intl_t),
+         cbcl_ext_t = case_when(is.na(cbcl155_extl_t) & !is.na(cbcl618_extl_t) ~ cbcl618_extl_t,
+                                !is.na(cbcl155_extl_t) & is.na(cbcl618_extl_t) ~ cbcl155_extl_t),
+         cbcl_tot_t = case_when(is.na(cbcl155_total_t) & !is.na(cbcl618_total_t) ~ cbcl618_total_t,
+                                !is.na(cbcl155_total_t) & is.na(cbcl618_total_t) ~ cbcl155_total_t),
+         .keep = "unused", .before = cgas)
+```
+
+# Calculate number of participants in each study
+```{r}
+trunc_data_2 %>% 
+  summarise(n_noa = sum(str_detect(subid, "_noa")),
+            n_pcit = sum(str_detect(subid, "_pcit")),
+            n_pcit_hc = sum(str_detect(subid, "_hc")),
+            n_pcit_cc = sum(str_detect(subid, "_cc")),
+            n_pcit_base = sum(str_detect(subid, "_base")))
+```
+
+# Calculate AIC and Cronbach's alpha for ERC, BIS/BAS, BDI-II, and MC2
+
+## ERC
+
+### Emotion Regulation
+```{r}
+erc_er_items <- c("erc01", "erc03", "erc07", "erc15", "erc16", "erc18", "erc21", "erc23")
+trunc_data_2 %>% 
+  dplyr::select(all_of(erc_er_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 536) %>% summary(.)
+```
+
+### Lability/Negativity
+```{r}
+erc_ln_items <- c("erc02", "erc04", "erc05", "erc06", "erc08", "erc09", "erc10", 
+                  "erc11", "erc13", "erc14", "erc17", "erc19", "erc20", "erc22", "erc24")
+trunc_data_2 %>% 
+  dplyr::select(all_of(erc_ln_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 536) %>% summary(.)
+```
+
+## BIS/BAS
+
+### BIS
+```{r}
+bis_items <- c("bisbas01", "bisbas04", "bisbas05", "bisbas06", "bisbas08", "bisbas13", "bisbas16")
+trunc_data_2 %>% 
+  dplyr::select(all_of(bis_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 324) %>% summary(.)
+```
+
+### BAS
+```{r}
+bas_items <- c("bisbas02", "bisbas03", "bisbas07", "bisbas09", "bisbas10", "bisbas11",
+               "bisbas12", "bisbas14", "bisbas15", "bisbas17", "bisbas18", "bisbas19", "bisbas20")
+trunc_data_2 %>% 
+  dplyr::select(all_of(bas_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 325) %>% summary(.)
+```
+#### BAS Drive
+```{r}
+bas_drive_items <- c("bisbas07", "bisbas14", "bisbas19", "bisbas20")
+trunc_data_2 %>% 
+  dplyr::select(all_of(bas_drive_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 327) %>% summary(.)
+```
+#### BAS Fun-Seeking
+```{r}
+bas_funseek_items <- c("bisbas10", "bisbas15", "bisbas17", "bisbas18")
+trunc_data_2 %>% 
+  dplyr::select(all_of(bas_funseek_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 328) %>% summary(.)
+```
+#### BAS Reward Responsiveness
+```{r}
+bas_reward_items <- c("bisbas02", "bisbas03", "bisbas09", "bisbas11", "bisbas12")
+trunc_data_2 %>% 
+  dplyr::select(all_of(bas_reward_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 327) %>% summary(.)
+```
+
+## Caregiver BDI-II
+### Total Score (excluding item 9)
+```{r}
+trunc_data_2 %>% 
+  dplyr::select(., contains("bdi"), -bdi09) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 541) %>% summary(.)
+```
+
+## My Child 2
+
+### Subscale 1: Guilt/Remorse after Transgression/Mishap/Wrongdoing
+```{r}
+mca_sub1_items <- c("mca03", "mca07", "mca15", "mca18", "mca19", "mca24", 
+                    "mca25", "mca27", "mca30", "mca38", "mca40", "mca47",
+                    "mca61", "mca70", "mca91", "mca96", "mca99", "mca100")
+trunc_data_2 %>% 
+  dplyr::select(all_of(mca_sub1_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 288) %>% summary(.)
+```
+
+### Subscale 6: Concern/Corrections Occasioned by Other's Transgressions
+```{r}
+mca_sub6_items <- c("mca02", "mca41", "mca43", "mca44", "mca55", "mca73", "mca93")
+trunc_data_2 %>% 
+  dplyr::select(all_of(mca_sub6_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 287) %>% summary(.)
+```
+
+### Subscale 9: Symbolic Reproduction of/dealing with Wrongdoing
+```{r}
+mca_sub9_items <- c("mca12", "mca14", "mca20", "mca28", "mca85")
+trunc_data_2 %>% 
+  dplyr::select(all_of(mca_sub9_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 288) %>% summary(.)
+```
+
+### Subscale 10: Sensitivity to Flawed/Damaged Objects, Themes of Wrongdoing
+```{r}
+mca_sub10_items <- c("mca26", "mca39", "mca45", "mca46", "mca66", "mca84", "mca95")
+trunc_data_2 %>% 
+  dplyr::select(all_of(mca_sub10_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 287) %>% summary(.)
+```
+
+### Guilt Feelings Scale (all items from subscales 1, 6, 9, and 10)
+```{r}
+trunc_data_2 %>% 
+  dplyr::select(all_of(mca_sub1_items), all_of(mca_sub6_items), 
+                all_of(mca_sub9_items), all_of(mca_sub10_items)) %>% 
+  psych::polychoric(., correct = .1) %>% 
+  .$rho %>% 
+  psych::alpha(., use = "pairwise", n.obs = 287) %>% summary(.)
+```
+
+# Create mean composite scores for the BDI-II, BIS/BAS, and ERC
+
+## Assess percentage of missing data across the row of item scores for each measure
+```{r}
+percent_missing = function (x){sum(is.na(x))/length(x)*100}
+
+perc_miss_df <- trunc_data_2 %>% 
+  mutate(bdi_perc_miss = apply(dplyr::select(., contains("bdi"), -bdi09), 1, percent_missing),
+         bis_perc_miss = apply(dplyr::select(., bis_items), 1, percent_missing),
+         bas_perc_miss = apply(dplyr::select(., bas_items), 1, percent_missing),
+         bas_drive_perc_miss = apply(dplyr::select(., bas_drive_items), 1, percent_missing),
+         bas_funseek_perc_miss = apply(dplyr::select(., bas_funseek_items), 1, percent_missing),
+         bas_rew_perc_miss = apply(dplyr::select(., bas_reward_items), 1, percent_missing),
+         erc_er_perc_miss = apply(dplyr::select(., erc_er_items), 1, percent_missing),
+         erc_ln_perc_miss = apply(dplyr::select(., erc_ln_items), 1, percent_missing),
+         mca_sub1_perc_miss = apply(dplyr::select(., mca_sub1_items), 1, percent_missing),
+         mca_sub6_perc_miss = apply(dplyr::select(., mca_sub6_items), 1, percent_missing),
+         mca_sub9_perc_miss = apply(dplyr::select(., mca_sub9_items), 1, percent_missing),
+         mca_sub10_perc_miss = apply(dplyr::select(., mca_sub10_items), 1, percent_missing),
+         mca_gltfeel_perc_miss = apply(dplyr::select(., mca_sub1_items,
+                                                     mca_sub6_items,
+                                                     mca_sub9_items, 
+                                                     mca_sub10_items), 1, percent_missing))
+```
+
+### Percent missing for BDI-II (excluding item 9)
+```{r}
+base::table(perc_miss_df$bdi_perc_miss)
+```
+
+### Percent missing for BIS
+```{r}
+base::table(perc_miss_df$bis_perc_miss)
+```
+
+### Percent missing for BAS
+```{r}
+base::table(perc_miss_df$bas_perc_miss)
+```
+
+### Percent missing for BAS Drive
+```{r}
+base::table(perc_miss_df$bas_drive_perc_miss)
+```
+
+### Percent missing for BAS Fun Seeking
+```{r}
+base::table(perc_miss_df$bas_funseek_perc_miss)
+```
+
+### Percent missing for BAS Reward Responsiveness
+```{r}
+base::table(perc_miss_df$bas_rew_perc_miss)
+```
+
+### Percent missing for ERC Emotion Regulation
+```{r}
+base::table(perc_miss_df$erc_er_perc_miss)
+```
+
+### Percent missing for ERC Lability/Negativity
+```{r}
+base::table(perc_miss_df$erc_ln_perc_miss)
+```
+
+### Percent missing for ERC Lability/Negativity
+```{r}
+base::table(perc_miss_df$mca_gltfeel_perc_miss)
+```
+
+## Calculate mean scores and remove item-level scores
+### For those with at least 90% of subscale item-level data (BDI, BIS/BAS, ERC)
+### For PCIT-ED subjects with the EEDP cutoff amount of data per subscale of the My Child
+```{r}
+trunc_data_3 <- perc_miss_df %>% 
+  mutate(.,
+         bdi_mean = case_when(bdi_perc_miss <= 10 ~
+                                  rowMeans(dplyr::select(., contains("bdi"), -bdi09), na.rm = T)),
+         bis_mean = case_when(bis_perc_miss <= 10 ~
+                                rowMeans(dplyr::select(., bis_items), na.rm = T)),
+         bas_mean = case_when(bas_perc_miss <= 10 ~
+                                rowMeans(dplyr::select(., bas_items), na.rm = T)),
+         bas_drive_mean = case_when(bas_drive_perc_miss <= 10 ~
+                                      rowMeans(dplyr::select(., bas_drive_items), na.rm = T)),
+         bas_funseek_mean = case_when(bas_funseek_perc_miss <= 10 ~ 
+                                        rowMeans(dplyr::select(., bas_funseek_items), na.rm = T)),
+         bas_reward_mean = case_when(bas_rew_perc_miss <= 10 ~
+                                       rowMeans(dplyr::select(., bas_reward_items), na.rm = T)),
+         erc_er_mean = case_when(erc_er_perc_miss <= 10 ~
+                                   rowMeans(dplyr::select(., erc_er_items), na.rm = T)),
+         erc_ln_mean = case_when(erc_ln_perc_miss <= 10 ~
+                                   rowMeans(dplyr::select(., erc_ln_items), na.rm = T)),
+         mca_gltfeel_mean = case_when(str_starts(subid, "9") & # Removed 1 NOA and 2 PCIT-ED controls who mistakenly received MC2
+                                        mca_sub1_perc_miss <= 50 & 
+                                        mca_sub6_perc_miss <= 57 &
+                                        mca_sub9_perc_miss <= 50 &
+                                        mca_sub10_perc_miss <= 57 ~
+                                        rowMeans(dplyr::select(., mca_sub1_items,
+                                                               mca_sub6_items,
+                                                               mca_sub9_items,
+                                                               mca_sub10_items), na.rm = T)),
+         .after = pfc23) %>% 
+  dplyr::select(., -c(bdi01:mca100), -contains("perc_miss"))
+```
+
+# Determine KSADS-EC diagnoses of MDD
+
+## Assess percentage of missing KSADS MDD data to help filter out
+## participants who should not be provided with MDD diagnostic data
+### (i.e., those who have substantial missing items)
+```{r}
+ksads_mdd_perc_miss_df <- trunc_data_3 %>% 
+  mutate(ksads_mdd_perc_miss = apply(dplyr::select(., contains("ksads_mdd")), 1, percent_missing))    
+base::table(ksads_mdd_perc_miss_df$ksads_mdd_perc_miss)
+```
+
+## Calculate the number of symptoms that meet the sub/threshold cutoffs
+## Created 2 columns to track each (1 for subthreshold + threshold, 1 for threshold only)
+## Done for participants not missing substantial data and who completed screener, at least
+```{r}
+ksads_mdd_num_sx <- ksads_mdd_perc_miss_df %>% 
+  dplyr::select(., contains("ksads_mdd")) %>%
+  mutate(num_mdd_sx_23 = 
+           case_when(ksads_mdd_perc_miss < 90 ~ 
+                       rowSums(dplyr::select(., -ksads_mdd_perc_miss) > 1, na.rm = T)),
+         num_mdd_sx_3 = 
+           case_when(ksads_mdd_perc_miss < 90 ~
+                       rowSums(dplyr::select(., -ksads_mdd_perc_miss) > 2, na.rm = T)),
+         .keep = "none") %>%
+  add_column(., subid = ksads_mdd_perc_miss_df$subid) %>% 
+  relocate(., subid, .before = num_mdd_sx_23)
+```
+
+## For children <7 years old, 4+ sub/threshold symptoms present
+## For children 7+ years old, 5+ threshold symptoms present
+```{r}
+trunc_data_4 <- trunc_data_3 %>% 
+  left_join(., ksads_mdd_num_sx, by = "subid") %>% 
+  # Determine if participants meet criteria for MDD diagnosis based on age
+  mutate(mdd_dx = case_when(age_mos < 84 & num_mdd_sx_23 >= 4 ~ 1,
+                                   age_mos < 84 & num_mdd_sx_23 < 4 ~ 0,
+                                   age_mos >= 84 & num_mdd_sx_3 >= 5 ~ 1,
+                                   age_mos >= 84 & num_mdd_sx_3 < 5 ~ 0)) %>% 
+  dplyr::select(., -contains("num_mdd_sx"), -contains("ksads_mdd"), ksads_mdd_anhed) %>% 
+  relocate(., c(ksads_mdd_anhed, mdd_dx), .before = mania_cons)
+```
+
+# Save the truncated dataset
+```{r}
+#write.csv(trunc_data_4, 
+#          "C:/Users/nicol/Box/01. Nicolas Dissertation/Data/truncated_dataset.csv",
+#          row.names = F)
+# Update the file path to reflect where you want to save the cleaned dataset
+```
+
+

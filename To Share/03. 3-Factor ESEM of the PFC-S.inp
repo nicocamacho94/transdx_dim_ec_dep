@@ -1,0 +1,59 @@
+TITLE: 3-factor ESEM of the PFC-S;
+
+DATA:
+FILE = "C:\Users\nicol\Box\
+01. Nicolas Dissertation\Data\
+mi_data_p1_mplus\
+mi_data_p1_mplus__IMP_LIST.txt";
+! Update the file path to reflect where the
+! imputed data can be found
+
+TYPE = IMPUTATION;
+
+VARIABLE:
+NAMES = age sex pfc01-pfc23 bdi bis bas 
+bas_drv bas_fun bas_rew erc_er erc_ln
+mca_glt brief_gec ks_anhed;
+MISSING ARE ALL (999);
+
+USEVARIABLES = pfc01-pfc15 pfc17-pfc23;
+CATEGORICAL = pfc01-pfc15 pfc17-pfc23;
+
+ANALYSIS:
+ESTIMATOR = WLSMV;
+ROTATION = TARGET (oblique);
+
+MODEL:
+! Social and Behavioral Anhedonia
+SBA BY pfc01* pfc03 pfc05 pfc09 pfc10 
+pfc17 pfc22 ! pfc17, pfc22 cross-loadings
+pfc02~0 pfc04~0 pfc06~0 pfc07~0 pfc08~0 
+pfc11~0 pfc12~0 pfc13~0 pfc14~0 pfc15~0 
+pfc18~0 pfc19~0 pfc20~0 pfc21~0 pfc23~0 (*1);
+
+! Emotional and Behavioral Dysregulation
+EBD BY pfc04* pfc06 pfc07 pfc08 pfc11 pfc14 
+pfc21 pfc22 pfc23 ! pfc21-pfc23 cross-loadings
+pfc01~0 pfc02~0 pfc03~0 pfc05~0 pfc09~0 
+pfc10~0 pfc12~0 pfc13~0 pfc15~0 pfc17~0 
+pfc18~0 pfc19~0 pfc20~0 (*1);
+
+! Excessive Guilt and Sadness
+EGS BY pfc02* pfc12 pfc13 pfc15 
+pfc17 pfc18 pfc19 pfc20 pfc21 ! pfc17, pfc21 cross-loadings
+pfc01~0 pfc03~0 pfc04~0 pfc05~0 pfc06~0 
+pfc07~0 pfc08~0 pfc09~0 pfc10~0 pfc11~0 
+pfc14~0 pfc22~0 pfc23~0 (*1);
+
+! Factor variances held at 1
+SBA@1;
+EBD@1;
+EGS@1;
+
+! Correlations between factors
+SBA WITH EBD;
+SBA WITH EGS;
+EBD WITH EGS;
+
+OUTPUT:
+SAMPSTAT STDYX RESIDUAL;

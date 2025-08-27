@@ -1,0 +1,839 @@
+---
+title: "02. Multiple Imputation"
+author: "Nicolas L. Camacho"
+date: "2025-08-27"
+output: html_document
+---
+
+# Install packages (where necessary) and load libraries to run this script
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+required_packages <- c("knitr", "tidyverse", "VIM", "naniar", "smd", "stats",
+                       "car", "broom", "mice", "miceadds")
+installed <- required_packages %in% rownames(installed.packages())
+if(any(!installed)) {
+  install.packages(required_packages[!installed])
+}
+invisible(lapply(required_packages, library, character.only = T))
+```
+
+# Set up the root directory from which the cleaned dataset is pulled
+```{r setup, echo = TRUE, message = FALSE, warning = FALSE}
+opts_knit$set(root.dir = "C:/Users/nicol/Box/01. Nicolas Dissertation/Data/")
+# Update this section to reflect the file path that contains the cleaned dataset
+```
+
+# Load cleaned dataset
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+trunc_data <- read_csv("truncated_dataset.csv") %>% 
+  mutate(subid = as.factor(subid),
+         across(sex:pfc23, as.factor),
+         across(ksads_mdd_anhed:ptsd_cons, as.factor))
+```
+
+# Add auxiliary variables based on participation in the NOA/PCIT-ED study
+## Note: CGAS is already in the dataset and was also used as an auxiliary var
+```{r}
+trunc_data_2 <- trunc_data %>% 
+  mutate(noa_v_pcit_sub = factor(if_else(str_detect(subid, "noa"), 1, 0)), # NOA = 1, PCIT-ED = 0
+         pcit_hc_sub = factor(if_else(str_detect(subid, "pcited_hc"), 1, 0)), # PCIT-ED Healthy Controls
+         pcit_cc_sub = factor(if_else(str_detect(subid, "pcited_cc"), 1, 0)), # PCIT-ED Community Controls
+         .after = income) 
+```
+
+# Assess the percent of missing data
+
+## Across the entire dataframe
+```{r}
+kable(trunc_data_2 %>%
+        summarise(
+          entire = pct_miss(dplyr::select(., pfc01:ptsd_cons)),
+          pfcs = pct_miss(dplyr::select(., contains("pfc"))),
+          bdi = pct_miss(dplyr::select(., bdi_mean)),
+          bis_bas = pct_miss(dplyr::select(., bis_mean:bas_reward_mean)),
+          erc = pct_miss(dplyr::select(., contains("erc"))),
+          mc2 = pct_miss(dplyr::select(., mca_gltfeel_mean)),
+          brief = pct_miss(dplyr::select(., brief_gec_t_comb)),
+          cbcl = pct_miss(dplyr::select(., contains("cbcl"))),
+          cgas = pct_miss(dplyr::select(., cgas)),
+          ksads_mdd_anhed = pct_miss(dplyr::select(., ksads_mdd_anhed)),
+          ksads_dx = pct_miss(dplyr::select(., mdd_dx, contains("cons")))))
+```
+
+## NOA
+```{r}
+kable(trunc_data_2 %>% 
+        filter(str_detect(subid, "noa")) %>%
+        summarise(
+          entire = pct_miss(dplyr::select(., pfc01:ptsd_cons)),
+          pfcs = pct_miss(dplyr::select(., contains("pfc"))),          
+          bdi = pct_miss(dplyr::select(., bdi_mean)),
+          bis_bas = pct_miss(dplyr::select(., bis_mean:bas_reward_mean)),
+          erc = pct_miss(dplyr::select(., contains("erc"))),
+          mc2 = pct_miss(dplyr::select(., mca_gltfeel_mean)),
+          brief = pct_miss(dplyr::select(., brief_gec_t_comb)),
+          cbcl = pct_miss(dplyr::select(., contains("cbcl"))),
+          cgas = pct_miss(dplyr::select(., cgas)),
+          ksads_mdd_anhed = pct_miss(dplyr::select(., ksads_mdd_anhed)),
+          ksads_dx = pct_miss(dplyr::select(., mdd_dx, contains("cons")))))
+```
+
+
+## PCIT-ED
+```{r}
+kable(trunc_data_2 %>% 
+        filter(str_detect(subid, "pcit")) %>%
+        summarise(
+          entire = pct_miss(dplyr::select(., pfc01:ptsd_cons)),
+          pfcs = pct_miss(dplyr::select(., contains("pfc"))),
+          bdi = pct_miss(dplyr::select(., bdi_mean)),
+          bis_bas = pct_miss(dplyr::select(., bis_mean:bas_reward_mean)),
+          erc = pct_miss(dplyr::select(., contains("erc"))),
+          mc2 = pct_miss(dplyr::select(., mca_gltfeel_mean)),
+          brief = pct_miss(dplyr::select(., brief_gec_t_comb)),
+          cbcl = pct_miss(dplyr::select(., contains("cbcl"))),
+          cgas = pct_miss(dplyr::select(., cgas)),
+          ksads_mdd_anhed = pct_miss(dplyr::select(., ksads_mdd_anhed)),
+          ksads_dx = pct_miss(dplyr::select(., mdd_dx, contains("cons")))))
+```
+
+# Create dummy variables for all variables with missing data
+# and remove dummy variables that will not be imputed (e.g., child education)
+```{r}
+miss_dum_fun <- list(miss_dum = ~factor(if_else(is.na(.x), 1, 0)))
+
+trunc_data_3 <- trunc_data_2 %>% 
+  mutate(across(where(any_na), miss_dum_fun, .names = "{.col}_{.fn}")) %>% 
+  dplyr::select(., -racespec_miss_dum, -child_edu_miss_dum, -informant_miss_dum,
+                -income_miss_dum, -ksads_mdd_anhed_miss_dum, -mdd_dx_miss_dum, 
+                -contains("cons_miss_dum"))
+```
+
+# Test which variables in the dataset are useful predictors of the missing data
+
+## PFC-S missing data (very few)
+
+### Using Standardized Mean Differences for continuous variables
+### Cohen's effect size of +/- .20 (small effect) is minimum threshold
+```{r}
+pfcs_smd_summary <- trunc_data_3 %>% 
+  pivot_longer(., c(pfc02_miss_dum:pfc22_miss_dum),
+               names_to = "pfc_miss_dum_vars", values_to = "vals") %>% 
+  group_by(pfc_miss_dum_vars) %>% 
+  summarise(across(c(age_mos, bdi_mean, erc_er_mean, erc_ln_mean, 
+                     brief_gec_t_comb), ~smd(x = .x, g = vals, na.rm = T)$estimate)) %>% 
+  rename(., vars = pfc_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+kable(pfcs_smd_summary)
+
+# Other continuous variables could not be used as they had missing data in cases
+# where data was missing for the PFC-S items
+```
+
+### Binary summary of which continuous variables should be predictors of missing data
+```{r}
+pfcs_smd_binary <- pfcs_smd_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(abs(.x) >= .20, 1, 0)))
+
+kable(pfcs_smd_binary)
+```
+
+### Logistic regression p-value results for categorical variables
+```{r, warning = F}
+pfcs_logreg_summary <- trunc_data_3 %>% 
+  dplyr::select(., sex, race, hispanic, child_edu, informant, income, 
+                pfc01:pfc23, noa_v_pcit_sub, pcit_hc_sub, pcit_cc_sub, 
+                ksads_mdd_anhed, mdd_dx, contains("_cons"), 
+                pfc02_miss_dum:pfc22_miss_dum) %>%
+  pivot_longer(., c(pfc02_miss_dum:pfc22_miss_dum),
+               names_to = "pfcs_miss_dum_vars", values_to = "vals") %>% 
+  group_by(pfcs_miss_dum_vars) %>% 
+  summarise(across(c(sex:ptsd_cons), ~tidy(Anova(glm(vals ~ 1 + .x,
+                                                       family = "binomial", data = .),
+                                                   type = "III"))$p.value)) %>% 
+  rename(., vars = pfcs_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+
+kable(pfcs_logreg_summary)
+```
+
+### Binary summary of which categorical variables should be predictors of missing data
+```{r}
+pfcs_logreg_binary <- pfcs_logreg_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(.x < .05, 1, 0)))
+
+kable(pfcs_logreg_binary)
+```
+
+## BIS/BAS missing data (for PCIT-ED participants only)
+
+### Using Standardized Mean Differences for continuous variables
+### Cohen's effect size of +/- .20 (small effect) is minimum threshold
+```{r}
+bisbas_smd_summary <- trunc_data_3 %>% 
+  filter(str_detect(subid, "pcit")) %>% 
+  pivot_longer(., c(bis_mean_miss_dum:bas_reward_mean_miss_dum),
+               names_to = "bisbas_miss_dum_vars", values_to = "vals") %>% 
+  group_by(bisbas_miss_dum_vars) %>% 
+  summarise(across(c(age_mos, bdi_mean, erc_er_mean, erc_ln_mean,
+                     mca_gltfeel_mean, brief_gec_t_comb, cbcl_int_t, cbcl_ext_t,
+                     cbcl_tot_t, cgas), ~smd(x = .x, g = vals, na.rm = T)$estimate)) %>% 
+  rename(., vars = bisbas_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+kable(bisbas_smd_summary)
+
+# Other continuous variables could not be used as they had missing data in cases
+# where data was missing for the PFC-S items
+```
+
+### Binary summary of which continuous variables should be predictors of missing data
+```{r}
+bisbas_smd_binary <- bisbas_smd_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(abs(.x) >= .20, 1, 0)))
+
+kable(bisbas_smd_binary)
+```
+
+### Logistic regression p-value results for categorical variables
+```{r, warning = F}
+bisbas_logreg_summary <- trunc_data_3 %>% 
+  filter(str_detect(subid, "pcit")) %>%
+  dplyr::select(., sex, race, hispanic, child_edu, informant, income, 
+                pfc01:pfc23, pcit_hc_sub, pcit_cc_sub, ksads_mdd_anhed, mdd_dx,
+                contains("_cons"), bis_mean_miss_dum:bas_reward_mean_miss_dum) %>%
+  pivot_longer(., c(bis_mean_miss_dum:bas_reward_mean_miss_dum),
+               names_to = "bisbas_miss_dum_vars", values_to = "vals") %>% 
+  group_by(bisbas_miss_dum_vars) %>% 
+  summarise(across(c(sex:ptsd_cons), ~tidy(Anova(glm(vals ~ 1 + .x,
+                                                       family = "binomial", data = .),
+                                                   type = "III"))$p.value)) %>% 
+  rename(., vars = bisbas_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+
+kable(bisbas_logreg_summary)
+```
+
+### Binary summary of which categorical variables should be predictors of missing data
+```{r}
+bisbas_logreg_binary <- bisbas_logreg_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(.x < .05, 1, 0)))
+
+kable(bisbas_logreg_binary)
+```
+
+## ERC missing data
+
+### Using Standardized Mean Differences for continuous variables
+### Cohen's effect size of +/- .20 (small effect) is minimum threshold
+```{r}
+erc_smd_summary <- trunc_data_3 %>% 
+  pivot_longer(., c(erc_er_mean_miss_dum, erc_ln_mean_miss_dum),
+               names_to = "erc_miss_dum_vars", values_to = "vals") %>% 
+  group_by(erc_miss_dum_vars) %>% 
+  summarise(across(c(age_mos, bdi_mean, bis_mean, bas_mean, bas_drive_mean,
+                     bas_funseek_mean, bas_reward_mean, brief_gec_t_comb, 
+                     cbcl_int_t, cbcl_ext_t, cbcl_tot_t, cgas), 
+                   ~smd(x = .x, g = vals, na.rm = T)$estimate)) %>% 
+  rename(., vars = erc_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+kable(erc_smd_summary)
+
+# Other continuous variables could not be used as they had missing data in cases
+# where data was missing for the PFC-S items
+```
+
+### Binary summary of which continuous variables should be predictors of missing data
+```{r}
+erc_smd_binary <- erc_smd_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(abs(.x) >= .20, 1, 0)))
+
+kable(erc_smd_binary)
+```
+
+### Logistic regression p-value results for categorical variables
+```{r, warning = F}
+erc_logreg_summary <- trunc_data_3 %>% 
+  dplyr::select(., sex, race, hispanic, child_edu, informant, income, 
+                pfc01:pfc23, pcit_hc_sub, pcit_cc_sub, ksads_mdd_anhed, mdd_dx,
+                contains("_cons"), erc_er_mean_miss_dum, erc_ln_mean_miss_dum) %>%
+  pivot_longer(., c(erc_er_mean_miss_dum, erc_ln_mean_miss_dum),
+               names_to = "erc_miss_dum_vars", values_to = "vals") %>% 
+  group_by(erc_miss_dum_vars) %>% 
+  summarise(across(c(sex:ptsd_cons), ~tidy(Anova(glm(vals ~ 1 + .x,
+                                                       family = "binomial", data = .),
+                                                   type = "III"))$p.value)) %>% 
+  rename(., vars = erc_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+
+kable(erc_logreg_summary)
+```
+
+### Binary summary of which categorical variables should be predictors of missing data
+```{r}
+erc_logreg_binary <- erc_logreg_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(.x < .05, 1, 0)))
+
+kable(erc_logreg_binary)
+```
+
+## My Child 2 missing data
+
+### Using Standardized Mean Differences for continuous variables
+### Cohen's effect size of +/- .20 (small effect) is minimum threshold
+```{r}
+mca_smd_summary <- trunc_data_3 %>% 
+  filter(str_detect(subid, "pcit")) %>% 
+  pivot_longer(., c(mca_gltfeel_mean_miss_dum),
+               names_to = "mca_miss_dum_vars", values_to = "vals") %>% 
+  group_by(mca_miss_dum_vars) %>% 
+  summarise(across(c(age_mos, bdi_mean, bis_mean, bas_mean, bas_drive_mean,
+                     bas_funseek_mean, bas_reward_mean, erc_er_mean, erc_ln_mean,
+                     brief_gec_t_comb, cbcl_int_t, cbcl_ext_t, cbcl_tot_t, cgas), 
+                   ~smd(x = .x, g = vals, na.rm = T)$estimate)) %>% 
+  rename(., vars = mca_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+kable(mca_smd_summary)
+
+# Other continuous variables could not be used as they had missing data in cases
+# where data was missing for the PFC-S items
+```
+
+### Binary summary of which continuous variables should be predictors of missing data
+```{r}
+mca_smd_binary <- mca_smd_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(abs(.x) >= .20, 1, 0)))
+
+kable(mca_smd_binary)
+```
+
+### Logistic regression p-value results for categorical variables
+```{r, warning = F}
+mca_logreg_summary <- trunc_data_3 %>% 
+  filter(str_detect(subid, "pcit")) %>% 
+  dplyr::select(., sex, race, hispanic, child_edu, informant, income, 
+                pfc01:pfc23, pcit_hc_sub, pcit_cc_sub, ksads_mdd_anhed, mdd_dx,
+                contains("_cons"), mca_gltfeel_mean_miss_dum) %>%
+  pivot_longer(., mca_gltfeel_mean_miss_dum,
+               names_to = "mca_miss_dum_vars", values_to = "vals") %>% 
+  group_by(mca_miss_dum_vars) %>% 
+  summarise(across(c(sex:ptsd_cons), ~tidy(Anova(glm(vals ~ 1 + .x,
+                                                       family = "binomial", data = .),
+                                                   type = "III"))$p.value)) %>% 
+  rename(., vars = mca_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+
+kable(mca_logreg_summary)
+```
+
+### Binary summary of which categorical variables should be predictors of missing data
+```{r}
+mca_logreg_binary <- mca_logreg_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(.x < .05, 1, 0)))
+
+kable(mca_logreg_binary)
+```
+
+## BRIEF GEC missing data
+
+### Using Standardized Mean Differences for continuous variables
+### Cohen's effect size of +/- .20 (small effect) is minimum threshold
+```{r}
+brief_smd_summary <- trunc_data_3 %>% 
+  pivot_longer(., brief_gec_t_comb_miss_dum,
+               names_to = "brief_miss_dum_vars", values_to = "vals") %>% 
+  group_by(brief_miss_dum_vars) %>% 
+  summarise(across(c(age_mos, bdi_mean, bis_mean, bas_mean, bas_drive_mean,
+                     bas_funseek_mean, bas_reward_mean, erc_er_mean, erc_ln_mean,
+                     mca_gltfeel_mean, cbcl_int_t, cbcl_ext_t,
+                     cbcl_tot_t, cgas), 
+                   ~smd(x = .x, g = vals, na.rm = T)$estimate)) %>% 
+  rename(., vars = brief_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+kable(brief_smd_summary)
+```
+
+### Binary summary of which continuous variables should be predictors of missing data
+```{r}
+brief_smd_binary <- brief_smd_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(abs(.x) >= .20, 1, 0)))
+
+kable(brief_smd_binary)
+```
+
+### Logistic regression p-value results for categorical variables
+```{r, warning = F}
+brief_logreg_summary <- trunc_data_3 %>% 
+  dplyr::select(., sex, race, hispanic, child_edu, informant, income, 
+                pfc01:pfc23, pcit_hc_sub, pcit_cc_sub, ksads_mdd_anhed, mdd_dx,
+                contains("_cons"), brief_gec_t_comb_miss_dum) %>%
+  pivot_longer(., brief_gec_t_comb_miss_dum,
+               names_to = "brief_miss_dum_vars", values_to = "vals") %>% 
+  group_by(brief_miss_dum_vars) %>% 
+  summarise(across(c(sex:ptsd_cons), ~tidy(Anova(glm(vals ~ 1 + .x,
+                                                       family = "binomial", data = .),
+                                                   type = "III"))$p.value)) %>% 
+  rename(., vars = brief_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+
+kable(brief_logreg_summary)
+```
+
+### Binary summary of which categorical variables should be predictors of missing data
+```{r}
+brief_logreg_binary <- brief_logreg_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(.x < .05, 1, 0)))
+
+kable(brief_logreg_binary)
+```
+
+## CBCL missing data
+
+### Using Standardized Mean Differences for continuous variables
+### Cohen's effect size of +/- .20 (small effect) is minimum threshold
+```{r}
+cbcl_smd_summary <- trunc_data_3 %>% 
+  pivot_longer(., c(cbcl_int_t_miss_dum:cbcl_tot_t_miss_dum),
+               names_to = "cbcl_miss_dum_vars", values_to = "vals") %>% 
+  group_by(cbcl_miss_dum_vars) %>% 
+  summarise(across(c(age_mos, bdi_mean, bis_mean, bas_mean, bas_drive_mean,
+                     bas_funseek_mean, bas_reward_mean, erc_er_mean, erc_ln_mean,
+                     mca_gltfeel_mean, brief_gec_t_comb, cgas), 
+                   ~smd(x = .x, g = vals, na.rm = T)$estimate)) %>% 
+  rename(., vars = cbcl_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+kable(cbcl_smd_summary)
+```
+
+### Binary summary of which continuous variables should be predictors of missing data
+```{r}
+cbcl_smd_binary <- cbcl_smd_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(abs(.x) >= .20, 1, 0)))
+
+kable(cbcl_smd_binary)
+```
+
+### Logistic regression p-value results for categorical variables
+```{r, warning = F}
+cbcl_logreg_summary <- trunc_data_3 %>% 
+  dplyr::select(., sex, race, hispanic, child_edu, informant, income, 
+                pfc01:pfc23, pcit_hc_sub, pcit_cc_sub, ksads_mdd_anhed, mdd_dx,
+                contains("_cons"), contains("cbcl")) %>%
+  pivot_longer(., c(cbcl_int_t_miss_dum:cbcl_tot_t_miss_dum),
+               names_to = "cbcl_miss_dum_vars", values_to = "vals") %>% 
+  group_by(cbcl_miss_dum_vars) %>% 
+  summarise(across(c(sex:ptsd_cons), ~tidy(Anova(glm(vals ~ 1 + .x,
+                                                       family = "binomial", data = .),
+                                                   type = "III"))$p.value)) %>% 
+  rename(., vars = cbcl_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+
+kable(cbcl_logreg_summary)
+```
+
+### Binary summary of which categorical variables should be predictors of missing data
+```{r}
+cbcl_logreg_binary <- cbcl_logreg_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(.x < .05, 1, 0)))
+
+kable(cbcl_logreg_binary)
+```
+
+## CGAS missing data
+
+### Using Standardized Mean Differences for continuous variables
+### Cohen's effect size of +/- .20 (small effect) is minimum threshold
+```{r}
+cgas_smd_summary <- trunc_data_3 %>% 
+  pivot_longer(., cgas_miss_dum,
+               names_to = "cgas_miss_dum_vars", values_to = "vals") %>% 
+  group_by(cgas_miss_dum_vars) %>% 
+  summarise(across(c(age_mos, bdi_mean, bis_mean, bas_mean, bas_drive_mean,
+                     bas_funseek_mean, bas_reward_mean, erc_er_mean, erc_ln_mean,
+                     mca_gltfeel_mean, brief_gec_t_comb, cbcl_int_t, cbcl_ext_t,
+                     cbcl_tot_t), 
+                   ~smd(x = .x, g = vals, na.rm = T)$estimate)) %>% 
+  rename(., vars = cgas_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+kable(cgas_smd_summary)
+```
+
+### Binary summary of which continuous variables should be predictors of missing data
+```{r}
+cgas_smd_binary <- cgas_smd_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(abs(.x) >= .20, 1, 0)))
+
+kable(cgas_smd_binary)
+```
+
+### Logistic regression p-value results for categorical variables
+```{r, warning = F}
+cgas_logreg_summary <- trunc_data_3 %>% 
+  dplyr::select(., sex, race, hispanic, child_edu, informant, income, 
+                pfc01:pfc23, pcit_hc_sub, pcit_cc_sub, ksads_mdd_anhed, mdd_dx,
+                contains("_cons"), cgas_miss_dum) %>%
+  pivot_longer(., cgas_miss_dum,
+               names_to = "cgas_miss_dum_vars", values_to = "vals") %>% 
+  group_by(cgas_miss_dum_vars) %>% 
+  summarise(across(c(sex:ptsd_cons), ~tidy(Anova(glm(vals ~ 1 + .x,
+                                                       family = "binomial", data = .),
+                                                   type = "III"))$p.value)) %>% 
+  rename(., vars = cgas_miss_dum_vars) %>% 
+  mutate(., vars = str_remove(vars, "_miss_dum"))
+
+kable(cgas_logreg_summary)
+```
+
+### Binary summary of which categorical variables should be predictors of missing data
+```{r}
+cgas_logreg_binary <- cgas_logreg_summary %>% 
+  mutate(across(where(is.numeric), ~if_else(.x < .05, 1, 0)))
+
+kable(cgas_logreg_binary)
+```
+
+# Begin multiple imputation process
+
+## Start by creating an imputation instance with no iterations (to access predictor and imputation method matrices)
+```{r}
+imp0 <- mice(trunc_data_2, maxit = 0)
+```
+
+## Extract predictor and imputation method matrices
+```{r}
+predMat <- imp0$predictorMatrix
+impMeth <- imp0$method
+```
+
+## Set up the predictor matrix according to results of SMD and logistic regression analyses
+```{r}
+predMat_res <- data.frame(predMat) %>%
+  rownames_to_column(., "vars") %>% 
+  mutate(across(-vars, ~case_when(.x >= 0 ~ 0))) %>% 
+  
+  # for PFC-S items
+  rows_update(., data.frame(pfcs_smd_binary), by = "vars") %>% 
+  rows_update(., data.frame(pfcs_logreg_binary), by = "vars") %>%
+  # for BIS/BAS subscales
+  rows_update(., data.frame(bisbas_smd_binary), by = "vars") %>% 
+  rows_update(., data.frame(bisbas_logreg_binary), by = "vars") %>%
+  # for ERC subscales
+  rows_update(., data.frame(erc_smd_binary), by = "vars") %>% 
+  rows_update(., data.frame(erc_logreg_binary), by = "vars") %>%
+  # for MCA subscale
+  rows_update(., data.frame(mca_smd_binary), by = "vars") %>% 
+  rows_update(., data.frame(mca_logreg_binary), by = "vars") %>%
+  # for BRIEF subscale
+  rows_update(., data.frame(brief_smd_binary), by = "vars") %>% 
+  rows_update(., data.frame(brief_logreg_binary), by = "vars") %>%
+  # for CBCL subscales
+  rows_update(., data.frame(cbcl_smd_binary), by = "vars") %>% 
+  rows_update(., data.frame(cbcl_logreg_binary), by = "vars") %>%
+  # for CGAS 
+  rows_update(., data.frame(cgas_smd_binary), by = "vars") %>% 
+  rows_update(., data.frame(cgas_logreg_binary), by = "vars") %>%
+  
+  column_to_rownames(., var = "vars") %>% 
+  as.matrix(.)
+```
+
+### Visualize the predictor matrix
+```{r, fig.height = 8, fig.width = 18}
+predMat_res %>% 
+  as.data.frame(.) %>% 
+  rownames_to_column(., var = "row_vars") %>%
+  mutate(row_vars = factor(row_vars, levels = unique(.$row_vars))) %>% 
+  pivot_longer(!row_vars, names_to = "predictors", values_to = "vals") %>% 
+  mutate(predictors = factor(predictors, levels = unique(.$predictors))) %>% 
+  ggplot(data = ., aes(x = predictors, y = row_vars, fill = vals)) +
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+## Set up the method matrix with predictive mean matching and proportional odds model algorithms for continuous and ordinal variables with missing data, respectively
+```{r}
+impMeth[c(5, 7:9, 50:63)] <- "" # remove imputation of demographics + diagnoses
+impMeth[c(14, 16, 18, 20, 26, 30, 32, 34)] <- "polr" # proportional odds model, PFC-S items
+impMeth[c(37:49)] <- "pmm" # predictive mean matching model, BIS/BAS, ERC, MC2, BRIEF, CBCL, CGAS
+kable(impMeth)
+```
+
+# Run multiple imputation (40 datasets) on dataset
+# while omitting the imputation of BIS/BAS and My Child 2 data
+# for NOA Study participants
+```{r}
+where_no_noa <- make.where(trunc_data_2)
+where_no_noa[1:173, c("bis_mean", "bas_mean", "bas_drive_mean", "bas_funseek_mean",
+                      "bas_reward_mean", "mca_gltfeel_mean")] <- FALSE
+mi_data <- mice(trunc_data_2, m = 40, method = impMeth,
+                predictorMatrix = predMat_res, maxit = 1, printFlag = F,
+                where = where_no_noa, seed = 02042025)
+```
+
+## Make sure there are no missing values for the variables that were imputed
+
+### Full dataset
+```{r}
+complete(mi_data, 1) %>% 
+  dplyr::select(., pfc01:cgas) %>% 
+  aggr(., comb = T, numbers = T, prop = F, cex.axis = 0.5)
+```
+
+### NOA Study
+```{r}
+complete(mi_data, 1) %>% 
+  filter(str_detect(subid, "noa")) %>% 
+  dplyr::select(., pfc01:cgas) %>% 
+  aggr(., comb = T, numbers = T, prop = F, cex.axis = 0.5)
+```
+
+### PCIT-ED Study
+```{r}
+complete(mi_data, 1) %>% 
+  filter(str_detect(subid, "noa")) %>% 
+  dplyr::select(., pfc01:cgas) %>% 
+  aggr(., comb = T, numbers = T, prop = F, cex.axis = 0.5)
+```
+
+### Issues arising from common missingness among continuous variables and 
+### diagnostic data
+
+```{r}
+complete(mi_data, 1) %>% 
+  dplyr::select(., sex, race, hispanic:income, bis_mean:ptsd_cons) %>% 
+  aggr(., comb = T, numbers = T, prop = F, cex.axis = 0.5)
+```
+
+## Assess Logged Events
+```{r}
+head(mi_data$loggedEvents, n = 11) # same 11 logged events across imputations
+```
+
+## Create new predictor matrix without diagnostic variables as predictors
+```{r}
+predMat_res_2 <- as.data.frame(predMat_res) %>% 
+  mutate(across(ksads_mdd_anhed:ptsd_cons, ~0)) %>% 
+  as.matrix(.)
+```
+
+### Visualize the predictor matrix
+```{r, fig.height = 8, fig.width = 18}
+predMat_res_2 %>% 
+  as.data.frame(.) %>% 
+  rownames_to_column(., var = "row_vars") %>%
+  mutate(row_vars = factor(row_vars, levels = unique(.$row_vars))) %>% 
+  pivot_longer(!row_vars, names_to = "predictors", values_to = "vals") %>% 
+  mutate(predictors = factor(predictors, levels = unique(.$predictors))) %>% 
+  ggplot(data = ., aes(x = predictors, y = row_vars, fill = vals)) +
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+# Re-run multiple imputation using new predictor matrix (attempt #2)
+```{r}
+mi_data_2 <- mice(trunc_data_2, m = 40, method = impMeth,
+                predictorMatrix = predMat_res_2, maxit = 1, printFlag = F,
+                where = where_no_noa, seed = 02042025)
+```
+
+## Make sure there are no missing values for the variables that were imputed
+
+### Full dataset
+```{r}
+complete(mi_data_2, 1) %>% 
+  dplyr::select(., pfc01:cgas) %>% 
+  aggr(., comb = T, numbers = T, prop = F, cex.axis = 0.5)
+```
+
+### NOA Study
+```{r}
+complete(mi_data_2, 1) %>% 
+  filter(str_detect(subid, "noa")) %>% 
+  dplyr::select(., sex, race, hispanic:income, pfc01:cgas) %>% 
+  aggr(., comb = T, numbers = T, prop = F, cex.axis = 0.5)
+```
+
+### PCIT-ED Study
+```{r}
+complete(mi_data_2, 1) %>% 
+  filter(str_detect(subid, "pcit")) %>% 
+  dplyr::select(., sex, race, hispanic:income, pfc01:cgas) %>% 
+  aggr(., comb = T, numbers = T, prop = F, cex.axis = 0.5)
+```
+
+### Issues arising from common missingness between the CGAS and 
+### certain variables not uniformly assessed in the PCIT-ED study
+### (i.e., child education and family income) and not at all assessed in the
+### NOA Study (i.e., BIS/BAS and My Child 2)
+```{r}
+trunc_data_2 %>% 
+  dplyr::select(., sex, race, hispanic:income, bis_mean:cgas) %>% 
+  aggr(., comb = T, numbers = T, prop = F, cex.axis = 0.5)
+```
+
+## Assess Logged Events
+```{r}
+head(mi_data_2$loggedEvents, n = 6) # same 6 logged events across imputations
+```
+
+## Create new predictor matrix removing child edu and income as predictor of CGAS
+## and BIS/BAS and My Child 2 as predictors of the ERC, CBCL, BRIEF, and CGAS
+```{r}
+predMat_res_3 <- as.data.frame(predMat_res_2) %>% 
+  rownames_to_column(., var = "row_names") %>% 
+  mutate(
+    bis_mean = if_else(row_names == "erc_er_mean" | row_names == "erc_ln_mean" |
+                         row_names == "cbcl_int_t" | row_names == "cbcl_ext_t" |
+                         row_names == "cbcl_tot_t" | row_names == "brief_gec_t_comb" |
+                         row_names == "cgas", 0, bis_mean),
+    bas_mean = if_else(row_names == "erc_er_mean" | row_names == "erc_ln_mean" |
+                         row_names == "cbcl_int_t" | row_names == "cbcl_ext_t" |
+                         row_names == "cbcl_tot_t" | row_names == "brief_gec_t_comb" |
+                         row_names == "cgas", 0, bas_mean),
+    bas_drive_mean = if_else(row_names == "erc_er_mean" | row_names == "erc_ln_mean" |
+                         row_names == "cbcl_int_t" | row_names == "cbcl_ext_t" |
+                         row_names == "cbcl_tot_t" | row_names == "brief_gec_t_comb" |
+                         row_names == "cgas", 0, bas_drive_mean),
+    bas_funseek_mean = if_else(row_names == "erc_er_mean" | row_names == "erc_ln_mean" |
+                         row_names == "cbcl_int_t" | row_names == "cbcl_ext_t" |
+                         row_names == "cbcl_tot_t" | row_names == "brief_gec_t_comb" |
+                         row_names == "cgas", 0, bas_funseek_mean),
+    bas_reward_mean = if_else(row_names == "erc_er_mean" | row_names == "erc_ln_mean" |
+                         row_names == "cbcl_int_t" | row_names == "cbcl_ext_t" |
+                         row_names == "cbcl_tot_t" | row_names == "brief_gec_t_comb" |
+                         row_names == "cgas", 0, bas_reward_mean),
+    mca_gltfeel_mean = if_else(row_names == "erc_er_mean" | row_names == "erc_ln_mean" |
+                         row_names == "cbcl_int_t" | row_names == "cbcl_ext_t" |
+                         row_names == "cbcl_tot_t" | row_names == "brief_gec_t_comb" |
+                         row_names == "cgas", 0, mca_gltfeel_mean),
+    child_edu = if_else(row_names == "cgas", 0, child_edu),
+    income = if_else(row_names == "cgas", 0, income)) %>% 
+  column_to_rownames(., var = "row_names") %>% 
+  as.matrix(.)
+```
+
+### Visualize the predictor matrix
+```{r, fig.height = 12, fig.width = 18}
+pred_order <- c("age_mos", "sex", "race", "racespec", "hispanic", "child_edu",
+                "informant", "income", "pfc01", "pfc02", "pfc03", "pfc04",
+                "pfc05", "pfc06", "pfc07", "pfc08", "pfc09", "pfc10", "pfc11", 
+                "pfc12", "pfc13", "pfc14", "pfc15", "pfc16", "pfc17", "pfc18",
+                "pfc19", "pfc20", "pfc21", "pfc22", "pfc23", "bdi", 
+                "bis", "bas", "bas_drive", "bas_funseek",
+                "bas_reward", "erc_er", "erc_ln", "mca_gltfeel",
+                "brief_gec_t", "cbcl_int_t", "cbcl_ext_t", "cbcl_tot_t", 
+                "noa_v_pcit_sub", "pcit_hc_sub", "pcit_cc_sub", "cgas")
+predMat_res_3 %>% 
+  as.data.frame(.) %>% 
+  rownames_to_column(., var = "row_vars") %>%
+  mutate(row_vars = factor(row_vars, levels = unique(.$row_vars))) %>% 
+  pivot_longer(!row_vars, names_to = "predictors", values_to = "vals") %>% 
+  mutate(predictors = factor(predictors, levels = unique(.$predictors))) %>% 
+  filter(!str_detect(row_vars, "_cons") & !str_detect(predictors, "_cons")) %>% 
+  filter(!str_detect(row_vars, "mdd_") & !str_detect(predictors, "mdd_")) %>% 
+  filter(row_vars != "subid" & row_vars != "age_mos" & row_vars != "sex" &
+           row_vars != "race" & row_vars != "racespec" & row_vars != "hispanic" &
+           row_vars != "child_edu" & row_vars != "informant" & row_vars != "income" &
+           row_vars != "noa_v_pcit_sub" & row_vars != "pcit_hc_sub" &
+           row_vars != "pcit_cc_sub" & row_vars != "cgas" & predictors != "subid") %>%
+  mutate(row_vars = str_remove(row_vars, "_mean"),
+         row_vars = str_remove(row_vars, "_comb"),
+         predictors = str_remove(predictors, "_mean"),
+         predictors = str_remove(predictors, "_comb")) %>% 
+  ggplot(data = ., aes(x = factor(predictors, pred_order), 
+                       y = row_vars, 
+                       fill = vals)) +
+  geom_tile() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none",
+        text = element_text(family = "serif", size = 24)) +
+  labs(x = "Predictors",
+       y = "Variables")
+```
+
+# Re-run multiple imputation using new predictor matrix
+```{r}
+mi_data_3 <- mice(trunc_data_2, m = 40, method = impMeth,
+                predictorMatrix = predMat_res_3, maxit = 1, printFlag = F,
+                where = where_no_noa, seed = 02042025)
+```
+
+## Make sure there are no missing values for the variables that were imputed
+
+### Full dataset
+```{r}
+complete(mi_data_3) %>%  
+  dplyr::select(., pfc01:cgas) %>% 
+  aggr(., comb = T, numbers = T, prop = F, cex.axis = 0.5)
+```
+
+### NOA Study
+```{r}
+complete(mi_data_3) %>%  
+  filter(str_detect(subid, "noa")) %>% 
+  dplyr::select(., pfc01:cgas) %>% 
+  aggr(., comb = T, numbers = T, prop = F, cex.axis = 0.5)
+```
+
+### PCIT-ED Study
+```{r}
+complete(mi_data_3) %>%  
+  filter(str_detect(subid, "pcit")) %>% 
+  dplyr::select(., pfc01:cgas) %>% 
+  aggr(., comb = T, numbers = T, prop = F, cex.axis = 0.5)
+```
+
+## Assess Logged Events
+```{r}
+head(mi_data_3$loggedEvents, n = 3) # same 3 logged events across imputations
+```
+
+# Make sure imputed data is feasible for range of variables
+```{r, fig.width = 12, fig.height = 8, message = F}
+complete(mi_data_3, "long") %>% 
+  mutate(across(pfc01:cgas, as.numeric)) %>% 
+  pivot_longer(., c(pfc01:cgas), names_to = "imputed_vars", values_to = "vals") %>% 
+  ggplot(aes(x = vals)) + 
+  geom_histogram() + 
+  facet_wrap(~imputed_vars, scales = "free")
+```
+
+# Update the root directory to be the Data folder
+```{r}
+opts_knit$set(root.dir = "C:/Users/nicol/Box/01. Nicolas Dissertation/Data/")
+# Update to reflect the file path in which you would like to store the
+# multiply imputed data
+```
+
+# Save information and data of the multiple imputations
+```{r, include = F}
+write.mice.imputation(mi.res = mi_data_3, 
+                      name = "multiply_imputed_data", 
+                      dattype = "csv",
+                      mids2spss = F)
+```
+
+# Edit multiply imputed dataset to be Mplus friendly
+
+## For Aims 1 and 2
+### Age, sex, all PFC-S items, BIS/BAS, ERC, BDI-II, My Child 2, BRIEF, KSADS Anhedonia
+```{r, include = F}
+cbind(lapply(lapply(complete(mi_data_3, "long"), is.na), sum))
+
+mi_data_3_mplus <- complete(mi_data_3, "long", include = T) %>% 
+  dplyr::select(., .imp, .id, age_mos, sex, pfc01:brief_gec_t_comb, ksads_mdd_anhed) %>% 
+  mutate(sex = case_when(sex == "Female" ~ 0, sex == "Male" ~ 1),
+         ksads_mdd_anhed = as.numeric(as.character(ksads_mdd_anhed))) %>% 
+  replace_na(., list(bis_mean = 999, bas_mean = 999, bas_drive_mean = 999,
+                     bas_funseek_mean = 999, bas_reward_mean = 999,
+                     mca_gltfeel_mean = 999,
+                     ksads_mdd_anhed = 999)) %>%
+  as.mids(.)
+
+write.mice.imputation(mi.res = mi_data_3_mplus, 
+                      name = "mi_data_p1_mplus", 
+                      dattype = "csv",
+                      include.varnames = F,
+                      mids2spss = F)
+```
+

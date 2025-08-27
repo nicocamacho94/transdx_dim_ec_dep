@@ -11,3 +11,9 @@
 ## Software & Versions
 
 ### Analyses were conducted in R version 4.5.0 and Mplus version 8.11 using Windows 11 Pro via a Lenovo Thinkpad T14 Gen 5.
+
+## Pre-Registration
+
+### A subset of the analyses conducted in this investigation were pre-registered here: 
+
+#### Camacho, N. L., Gaffrey, M. S., Gilbert, K., & Luby, J. L. (2024, December 18). Revisiting the Preschool Feelings Checklist-Scale: Using a Bifactor ESEM Framework to Investigate the Multidimensionality of Depressive Symptoms in Young Children. https://doi.org/10.17605/OSF.IO/GTPDV

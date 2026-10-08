@@ -1,4 +1,4 @@
-# Mapping a Transdiagnostic Dimension of Early Childhood Depressive Symptoms using the Preschool Feelings Checklist-Scale
+# Establishing a Transdiagnostic Dimension of Early Childhood Depressive Symptoms using the Preschool Feelings Checklist-Scale
 
 ### This repo contains the scripts (R, Mplus) that were used to analyze the data for this investigation (i.e., "To Share" folder). A README file is also provided as a guide for running the scripts.
 
@@ -17,3 +17,7 @@
 ### A subset of the analyses conducted in this investigation were pre-registered here: 
 
 #### Camacho, N. L., Gaffrey, M. S., Gilbert, K., & Luby, J. L. (2024, December 18). Revisiting the Preschool Feelings Checklist-Scale: Using a Bifactor ESEM Framework to Investigate the Multidimensionality of Depressive Symptoms in Young Children. https://doi.org/10.17605/OSF.IO/GTPDV
+
+## Publication
+
+### This project is currently in press at the _Journal of Child Psychology & Psychiatry - Advances_.

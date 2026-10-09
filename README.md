@@ -20,4 +20,4 @@
 
 ## Publication
 
-### This project is currently in press at the _Journal of Child Psychology & Psychiatry - Advances_.
+### The manuscript resulting from this project is published at _JCPP Advances_ (https://doi.org/10.1002/jcv2.70152).
